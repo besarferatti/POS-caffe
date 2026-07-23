@@ -4,12 +4,14 @@ import { LogOut, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { hasPermission } from "@/lib/auth/permissions";
+import { createClient } from "@/lib/supabase/server";
 import { requireProfile } from "@/lib/auth/user";
 import { signOut } from "./actions";
 
 export default async function AppLayout({ children }: Readonly<{ children: ReactNode }>) {
   const profile = await requireProfile();
-  const canManageStaff = hasPermission(profile.role, "staff:read");
+  const { data: staffAccess } = await (await createClient()).rpc("user_has_permission", { required_permission: "staff:manage" });
+  const canManageStaff = Boolean(staffAccess);
   const canManageProducts = hasPermission(profile.role, "products:manage");
 
   return (
