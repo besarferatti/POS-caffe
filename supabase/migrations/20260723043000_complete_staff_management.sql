@@ -1,5 +1,5 @@
 -- Staff management additions. This migration is intentionally additive.
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 alter table public.profiles
   add column if not exists active boolean not null default true,
@@ -48,7 +48,7 @@ insert into public.role_permissions(role, permission_key) values
 on conflict do nothing;
 
 create or replace function public.user_has_permission(required_permission text, checked_user_id uuid default auth.uid())
-returns boolean language sql stable security definer set search_path = public as $$
+returns boolean language sql stable security definer set search_path = public, extensions as $$
   select exists (
     select 1 from public.profiles p
     where p.id = checked_user_id and p.active and (
@@ -59,16 +59,16 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 create or replace function public.validate_staff_pin(candidate text)
-returns boolean language sql stable security definer set search_path = public as $$
- select exists(select 1 from public.profiles where id = auth.uid() and active and pin_hash is not null and pin_hash = crypt(candidate, pin_hash));
+returns boolean language sql stable security definer set search_path = public, extensions as $$
+ select exists(select 1 from public.profiles where id = auth.uid() and active and pin_hash is not null and pin_hash = extensions.crypt(candidate, pin_hash));
 $$;
 create or replace function public.hash_staff_pin(candidate text)
-returns text language sql volatile security definer set search_path = public as $$
- select crypt(candidate, gen_salt('bf'));
+returns text language sql volatile security definer set search_path = public, extensions as $$
+ select extensions.crypt(candidate, extensions.gen_salt('bf'));
 $$;
 
 create or replace function public.prevent_last_active_admin()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = public, extensions as $$
 begin
   if old.role = 'admin' and old.active and (new.role <> 'admin' or not new.active)
     and (select count(*) from public.profiles where role = 'admin' and active and id <> old.id) = 0 then
