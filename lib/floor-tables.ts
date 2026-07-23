@@ -10,6 +10,21 @@ export type FloorTable = {
   width: number | undefined;
   height: number | undefined;
   rotation: number | undefined;
+  shape: "round" | "square" | "rectangle";
+};
+
+export type FloorObject = {
+  id: string;
+  type: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  shape: "round" | "square" | "rectangle" | undefined;
+  status: TableStatus;
+  isTable: boolean;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -39,12 +54,20 @@ function isTableObject(object: JsonRecord) {
   return type !== undefined && TABLE_OBJECT_TYPES.has(type);
 }
 
+function shapeForObject(object: JsonRecord) {
+  const shape = stringValue(object.shape)?.toLowerCase() ?? stringValue(object.type)?.toLowerCase() ?? "";
+  if (shape.includes("round")) return "round" as const;
+  if (shape.includes("square")) return "square" as const;
+  return shape.includes("rectangle") || shape.includes("rectangular") ? "rectangle" as const : undefined;
+}
+
 function labelForTable(object: JsonRecord) {
   return labelValue(object.label)
     ?? labelValue(object.name)
     ?? labelValue(object.number)
     ?? labelValue(object.tableName)
     ?? labelValue(object.tableNumber)
+    ?? labelValue(object.text)
     ?? "Unnamed table";
 }
 
@@ -77,6 +100,31 @@ export function tablesFromFloorLayout(layout: unknown): FloorTable[] {
       width: numberValue(value.width),
       height: numberValue(value.height),
       rotation: numberValue(value.rotation),
+      shape: shapeForObject(value) ?? "rectangle",
+    }];
+  });
+}
+
+/** Read the editor canvas without changing its schema.  Coordinates are kept in
+ * the same pixel space so the orders screen can be a faithful read-only view. */
+export function objectsFromFloorLayout(layout: unknown): FloorObject[] {
+  if (!isRecord(layout) || !Array.isArray(layout.objects)) return [];
+  return layout.objects.flatMap((value, index) => {
+    if (!isRecord(value)) return [];
+    const type = stringValue(value.type) ?? "label";
+    const isTable = isTableObject(value);
+    return [{
+      id: stringValue(value.id) ?? `decoration-${index}`,
+      type,
+      label: labelForTable(value),
+      x: numberValue(value.x) ?? 0,
+      y: numberValue(value.y) ?? 0,
+      width: numberValue(value.width) ?? (type === "wall" || type === "divider" ? 180 : 120),
+      height: numberValue(value.height) ?? (type === "wall" || type === "divider" ? 10 : 80),
+      rotation: numberValue(value.rotation) ?? 0,
+      shape: shapeForObject(value),
+      status: statusForTable(value),
+      isTable,
     }];
   });
 }
