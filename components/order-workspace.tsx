@@ -10,7 +10,7 @@ type FloorObject = { id: string; type: string; label: string; x: number; y: numb
 type Category = { id: string; name: string };
 type Product = { id: string; category_id: string; name: string; price: number; tax_rate: number };
 type Order = { id: string; table_id: string; status: string; subtotal: number; total?: number; notes?: string; tax_total?: number; amount_paid?: number; balance_due?: number; internal_only?: boolean };
-type OrderItem = { id: string; product_id: string; quantity: number; price: number; notes: string; tax_rate_snapshot: number; printed_quantity: number; product?: { name: string }[] | null };
+type OrderItem = { id: string; product_id: string; quantity: number; price: number; notes: string; tax_rate_snapshot: number; printed_quantity: number; sent_quantity: number; product?: { name: string }[] | null };
 type PaymentMethod = { id: string; name: string; code: string };
 const money = (amount: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 
@@ -20,16 +20,96 @@ export function OrderWorkspace({ tables: initialTables, objects, floorError, cat
   const subtotal = useMemo(() => items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0), [items]);
   const tax = useMemo(() => items.reduce((sum, item) => sum + Number(item.price) * item.quantity * Number(item.tax_rate_snapshot || 0) / 100, 0), [items]);
   const total = subtotal + tax; const paid = Number(activeOrder?.amount_paid ?? 0); const balance = Math.max(0, total - paid); const change = Math.max(0, Number(tendered || 0) - Number(paymentAmount || 0));
-  const loadItems = async (order: Order) => { const { data, error } = await createClient().from("order_items").select("id, product_id, quantity, price, notes, tax_rate_snapshot, printed_quantity, product:products(name)").eq("order_id", order.id).is("deleted_at", null).order("created_at"); if (error) setMessage("Order opened, but items could not be loaded."); setItems((data as OrderItem[]) ?? []); };
+  const loadItems = async (order: Order) => { const { data, error } = await createClient().from("order_items").select("id, product_id, quantity, price, notes, tax_rate_snapshot, printed_quantity, sent_quantity, product:products(name)").eq("order_id", order.id).is("deleted_at", null).order("created_at"); if (error) setMessage("Order opened, but items could not be loaded."); setItems((data as OrderItem[]) ?? []); };
   async function selectTable(table: Table) { setBusy(true); setMessage(""); const { data, error } = await createClient().rpc("open_order_for_table", { target_table_id: table.id }).single(); if (error || !data) { setMessage(error?.message ?? "Unable to open this table."); setBusy(false); return; } const order = data as Order; setSelectedTable({ ...table, status: "occupied" }); setActiveOrder(order); setOrderNotes(order.notes ?? ""); setTables((value) => value.map((entry) => entry.id === table.id ? { ...entry, status: "occupied" } : entry)); await loadItems(order); setBusy(false); }
-  async function addProduct(product: Product) { if (!activeOrder || busy) return; setBusy(true); const existing = items.find((item) => item.product_id === product.id); const db = createClient(); const result = existing ? await db.from("order_items").update({ quantity: existing.quantity + 1 }).eq("id", existing.id) : await db.from("order_items").insert({ order_id: activeOrder.id, product_id: product.id, quantity: 1, price: product.price, product_name_snapshot: product.name, unit_price_snapshot: product.price, tax_rate_snapshot: product.tax_rate }).select("id, product_id, quantity, price, notes, tax_rate_snapshot, printed_quantity, product:products(name)").single(); if (result.error) setMessage(result.error.message); else setItems((value) => existing ? value.map((item) => item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item) : [...value, result.data as OrderItem]); setBusy(false); }
+  async function addProduct(product: Product) { if (!activeOrder || busy) return; setBusy(true); const existing = items.find((item) => item.product_id === product.id); const db = createClient(); const result = existing ? await db.from("order_items").update({ quantity: existing.quantity + 1 }).eq("id", existing.id) : await db.from("order_items").insert({ order_id: activeOrder.id, product_id: product.id, quantity: 1, price: product.price, product_name_snapshot: product.name, unit_price_snapshot: product.price, tax_rate_snapshot: product.tax_rate }).select("id, product_id, quantity, price, notes, tax_rate_snapshot, printed_quantity, sent_quantity, product:products(name)").single(); if (result.error) setMessage(result.error.message); else setItems((value) => existing ? value.map((item) => item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item) : [...value, result.data as OrderItem]); setBusy(false); }
   async function changeQuantity(item: OrderItem, quantity: number) { setBusy(true); const db = createClient(); const { data: { user } } = await db.auth.getUser(); const result = quantity <= 0 ? await db.from("order_items").update({ deleted_at: new Date().toISOString(), deleted_by: user?.id, status: "deleted" }).eq("id", item.id) : await db.from("order_items").update({ quantity }).eq("id", item.id); if (result.error) setMessage(result.error.message); else setItems((value) => quantity <= 0 ? value.filter((entry) => entry.id !== item.id) : value.map((entry) => entry.id === item.id ? { ...entry, quantity } : entry)); setBusy(false); }
   async function saveNotes(item: OrderItem, notes: string) { const { error } = await createClient().from("order_items").update({ notes }).eq("id", item.id); if (error) setMessage(error.message); else setItems((value) => value.map((entry) => entry.id === item.id ? { ...entry, notes } : entry)); }
-  async function saveOrder() { if (!activeOrder) return; setBusy(true); const { error } = await createClient().from("orders").update({ notes: orderNotes, subtotal, tax_total: tax, total, balance_due: balance }).eq("id", activeOrder.id); setMessage(error ? error.message : "Order saved."); setBusy(false); }
-  async function sendInternal() { if (!activeOrder) return; setBusy(true); const additions = items.filter((item) => item.quantity > item.printed_quantity); if (!additions.length) { setMessage("There are no new quantities to print."); setBusy(false); return; } const db = createClient(); const { data: { user } } = await db.auth.getUser(); const { data: job, error } = await db.from("print_jobs").insert({ order_id: activeOrder.id, type: "internal_ticket", status: "pending", idempotency_key: crypto.randomUUID(), created_by: user?.id, payload: { table: selectedTable?.name, order_id: activeOrder.id, items: additions.map((item) => ({ name: item.product?.[0]?.name, quantity: item.quantity - item.printed_quantity, notes: item.notes })), non_fiscal: true } }).select("id").single(); if (error || !job) setMessage(error?.message ?? "Could not create print job."); else { const itemResult = await db.from("print_job_items").insert(additions.map((item) => ({ print_job_id: job.id, order_item_id: item.id, quantity: item.quantity - item.printed_quantity }))); if (itemResult.error) setMessage(itemResult.error.message); else { await Promise.all(additions.map((item) => db.from("order_items").update({ printed_quantity: item.quantity, sent_quantity: item.quantity }).eq("id", item.id))); setItems((value) => value.map((item) => ({ ...item, printed_quantity: item.quantity }))); setMessage("Internal print job queued. It remains pending until a local agent acknowledges it."); } } setBusy(false); }
-  async function openPayment() { const { data, error } = await createClient().from("payment_methods").select("id,name,code").eq("enabled", true).order("sort_order"); if (error) { setMessage(error.message); return; } setPaymentMethods((data as PaymentMethod[]) ?? []); setPaymentMethodId(data?.[0]?.id ?? ""); setPaymentAmount(String(balance.toFixed(2))); setTendered(""); setPaymentOpen(true); }
-  async function completePayment(internalOnly = false) { if (!activeOrder || (!internalOnly && (!paymentMethodId || Number(paymentAmount) <= 0))) return; setBusy(true); const db = createClient(); const { data: { user } } = await db.auth.getUser(); if (!internalOnly) { const { error } = await db.from("payments").insert({ order_id: activeOrder.id, payment_method_id: paymentMethodId, amount: Number(paymentAmount), tendered_amount: tendered ? Number(tendered) : null, change_due: change, idempotency_key: crypto.randomUUID(), created_by: user?.id }); if (error) { setMessage(error.message); setBusy(false); return; } }
-    const nextPaid = internalOnly ? total : paid + Number(paymentAmount); const complete = internalOnly || nextPaid >= total; const { error } = await db.from("orders").update({ amount_paid: nextPaid, balance_due: Math.max(0, total - nextPaid), total, subtotal, tax_total: tax, status: internalOnly ? "internal_only" : complete ? "paid" : "partially_paid", internal_only: internalOnly, closed_at: complete || internalOnly ? new Date().toISOString() : null }).eq("id", activeOrder.id); if (error) setMessage(error.message); else { setMessage(complete || internalOnly ? "Payment recorded and table released." : "Partial payment recorded."); if (complete || internalOnly) { setTables((value) => value.map((table) => table.id === activeOrder.table_id ? { ...table, status: "available" } : table)); setActiveOrder(null); setSelectedTable(null); setItems([]); } else setActiveOrder({ ...activeOrder, amount_paid: nextPaid, balance_due: Math.max(0, total - nextPaid), status: "partially_paid" }); setPaymentOpen(false); } setBusy(false); }
-  async function cancelOrder() { if (!activeOrder || !confirm("Cancel this order?")) return; setBusy(true); const { error } = await createClient().from("orders").update({ status: "cancelled", closed_at: new Date().toISOString() }).eq("id", activeOrder.id); if (error) setMessage(error.message); else { setTables((value) => value.map((table) => table.id === activeOrder.table_id ? { ...table, status: "available" } : table)); setActiveOrder(null); setSelectedTable(null); setItems([]); setMessage("Order cancelled and table released."); } setBusy(false); }
+  const friendlyError = (error: { code?: string; message?: string } | null) =>
+    error?.code === "23514" || error?.message?.includes("orders_closed_at_matches_status")
+      ? "The order could not be finalized. Please refresh the order and try again."
+      : error?.message ?? "The order could not be updated. Please try again.";
+
+  async function saveOrder() {
+    if (!activeOrder) return;
+    setBusy(true);
+    const { error } = await createClient().from("orders").update({ notes: orderNotes, subtotal, tax_total: tax, total, balance_due: balance }).eq("id", activeOrder.id);
+    setMessage(error ? friendlyError(error) : "Order saved.");
+    setBusy(false);
+  }
+
+  async function sendInternal() {
+    if (!activeOrder) return;
+    setBusy(true);
+    const additions = items.filter((item) => item.quantity > item.sent_quantity);
+    if (!additions.length) {
+      setMessage("There are no new quantities to print.");
+      setBusy(false);
+      return;
+    }
+    const { data, error } = await createClient().rpc("queue_internal_print_job", {
+      target_order_id: activeOrder.id,
+      job_payload: { table: selectedTable?.name, order_id: activeOrder.id, items: additions.map((item) => ({ name: item.product?.[0]?.name, quantity: item.quantity - item.sent_quantity, notes: item.notes })) },
+      job_items: additions.map((item) => ({ order_item_id: item.id, quantity: item.quantity - item.sent_quantity }))
+    }).single();
+    if (error || !data) setMessage(friendlyError(error));
+    else {
+      setActiveOrder(data as Order);
+      setItems((value) => value.map((item) => ({ ...item, sent_quantity: item.quantity })));
+      setMessage("Internal print job queued. It remains pending until a local agent acknowledges it.");
+    }
+    setBusy(false);
+  }
+
+  async function openPayment() {
+    const { data, error } = await createClient().from("payment_methods").select("id,name,code").eq("enabled", true).order("sort_order");
+    if (error) { setMessage(friendlyError(error)); return; }
+    setPaymentMethods((data as PaymentMethod[]) ?? []);
+    setPaymentMethodId(data?.[0]?.id ?? "");
+    setPaymentAmount(String(balance.toFixed(2)));
+    setTendered("");
+    setPaymentOpen(true);
+  }
+
+  function releaseOrder(message: string) {
+    if (!activeOrder) return;
+    setTables((value) => value.map((table) => table.id === activeOrder.table_id ? { ...table, status: "available" } : table));
+    setActiveOrder(null); setSelectedTable(null); setItems([]); setPaymentOpen(false); setMessage(message);
+  }
+
+  async function completePayment(internalOnly = false) {
+    if (!activeOrder || (!internalOnly && (!paymentMethodId || Number(paymentAmount) <= 0))) return;
+    setBusy(true);
+    if (internalOnly) {
+      const { data, error } = await createClient().rpc("mark_order_internal_only", { target_order_id: activeOrder.id }).single();
+      if (error || !data) setMessage(friendlyError(error));
+      else { setActiveOrder(data as Order); setPaymentOpen(false); setMessage("Order marked internal-only. The table remains occupied."); }
+      setBusy(false);
+      return;
+    }
+    const { data, error } = await createClient().rpc("record_order_payment", {
+      target_order_id: activeOrder.id,
+      target_payment_method_id: paymentMethodId,
+      payment_amount: Number(paymentAmount),
+      tendered_amount: tendered ? Number(tendered) : null,
+      payment_change_due: change,
+      payment_idempotency_key: crypto.randomUUID()
+    }).single();
+    if (error || !data) setMessage(friendlyError(error));
+    else {
+      const order = data as Order;
+      if (order.status === "paid") releaseOrder("Payment recorded and table released. Fiscal receipt queued when required.");
+      else { setActiveOrder(order); setPaymentOpen(false); setMessage("Partial payment recorded. The table remains occupied."); }
+    }
+    setBusy(false);
+  }
+
+  async function cancelOrder() {
+    if (!activeOrder || !confirm("Cancel this order?")) return;
+    setBusy(true);
+    const { error } = await createClient().from("orders").update({ status: "cancelled", closed_at: new Date().toISOString() }).eq("id", activeOrder.id);
+    if (error) setMessage(friendlyError(error)); else releaseOrder("Order cancelled and table released.");
+    setBusy(false);
+  }
   return <section className="mx-auto max-w-7xl"><div className="mb-7 flex items-end justify-between"><div><p className="text-sm font-semibold text-primary">ORDER MANAGEMENT</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Tables & orders</h1></div></div><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_27rem]"><div className="space-y-6"><div className="rounded-xl border bg-card p-4 shadow-sm"><div className="mb-4 flex justify-between"><h2 className="font-semibold">Floor</h2><div className="flex gap-3 text-xs"><span>Available</span><span className="text-amber-600">Occupied</span><span className="text-blue-600">Reserved</span></div></div>{floorError ? <p role="alert">{floorError}</p> : <div className="floor-canvas">{objects.map((object) => { const table = tables.find((entry) => entry.id === object.id); return object.isTable && table ? <button key={object.id} onClick={() => selectTable(table)} disabled={busy} className={`floor-object floor-table ${object.shape === "round" ? "rounded-full" : "rounded-md"} ${table.status === "occupied" ? "floor-occupied" : table.status === "reserved" ? "floor-reserved" : ""}`} style={{ left: object.x, top: object.y, width: object.width, height: object.height, transform: `rotate(${object.rotation}deg)`, zIndex: object.zIndex }}><span>{table.name}</span><small>{table.status}</small></button> : <div key={object.id} className={`floor-object floor-decoration floor-${object.type}`} style={{ left: object.x, top: object.y, width: object.width, height: object.height, transform: `rotate(${object.rotation}deg)`, zIndex: object.zIndex }}>{object.label}</div>; })}</div>}</div>{activeOrder && <div className="rounded-xl border bg-card p-4"><div className="flex gap-2 overflow-x-auto">{categories.map((category) => <button key={category.id} onClick={() => setCategoryId(category.id)} className={`rounded-full px-4 py-2 text-sm ${categoryId === category.id ? "bg-primary text-primary-foreground" : "bg-muted"}`}>{category.name}</button>)}</div><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{catalogError ? <p>{catalogError}</p> : visibleProducts.map((product) => <button key={product.id} onClick={() => addProduct(product)} disabled={busy} className="min-h-24 rounded-xl border p-3 text-left"><b>{product.name}</b><span className="mt-2 block text-primary">{money(Number(product.price))}</span></button>)}</div></div>}</div><aside className="h-fit rounded-xl border bg-card shadow-sm"><div className="border-b p-5"><h2 className="font-semibold">{selectedTable ? `${selectedTable.name} order` : "Select a table"}</h2></div><div className="min-h-56 p-3">{!activeOrder ? <p className="text-sm text-muted-foreground">Choose a table to create or resume an order.</p> : <>{items.map((item) => <div key={item.id} className="border-b py-3"><div className="flex gap-2"><div className="min-w-0 flex-1"><b>{item.product?.[0]?.name}</b><small className="block">{money(Number(item.price))}</small></div><button onClick={() => changeQuantity(item, item.quantity - 1)} disabled={busy}><Minus /></button><span>{item.quantity}</span><button onClick={() => changeQuantity(item, item.quantity + 1)} disabled={busy}><Plus /></button><button onClick={() => changeQuantity(item, 0)} disabled={busy}><Trash2 /></button></div><input defaultValue={item.notes} onBlur={(event) => saveNotes(item, event.target.value)} placeholder="Item note" className="mt-2 w-full rounded border p-1" /></div>)}<textarea value={orderNotes} onChange={(event) => setOrderNotes(event.target.value)} placeholder="Order notes" className="mt-3 w-full rounded border p-2" /></>}</div>{activeOrder && <div className="border-t p-5"><div className="flex justify-between"><span>Subtotal</span><span>{money(subtotal)}</span></div><div className="mt-1 flex justify-between"><span>Tax</span><span>{money(tax)}</span></div><div className="mt-2 flex justify-between text-lg font-bold"><span>Total</span><span>{money(total)}</span></div>{paid > 0 && <div className="flex justify-between text-sm"><span>Balance due</span><span>{money(balance)}</span></div>}{message && <p role="status" className="mt-3 text-sm">{message}</p>}<div className="mt-4 grid grid-cols-2 gap-2"><Button onClick={saveOrder} disabled={busy}>Save Order</Button><Button variant="outline" onClick={sendInternal} disabled={busy}><Printer /> Send Internal</Button><Button onClick={openPayment} disabled={busy}>Pay</Button><Button variant="outline" onClick={cancelOrder} disabled={busy}><X /> Cancel</Button></div></div>}</aside></div>{paymentOpen && <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"><div className="w-full max-w-md rounded-xl bg-card p-5 shadow-xl"><h2 className="text-xl font-bold">Payment</h2>{paymentMethods.length === 0 ? <p className="mt-3 text-sm">No enabled payment method is configured.</p> : <><label className="mt-4 block text-sm">Method<select value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)} className="mt-1 w-full rounded border p-2">{paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label><label className="mt-3 block text-sm">Amount<input type="number" min="0" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} className="mt-1 w-full rounded border p-2" /></label><label className="mt-3 block text-sm">Amount tendered<input type="number" min="0" step="0.01" value={tendered} onChange={(event) => setTendered(event.target.value)} className="mt-1 w-full rounded border p-2" /></label><p className="mt-2 text-sm">Change due: {money(change)}</p></>}<div className="mt-5 grid grid-cols-2 gap-2"><Button onClick={() => completePayment(false)} disabled={busy || !paymentMethods.length}>Record payment</Button><Button variant="outline" onClick={() => completePayment(true)} disabled={busy}>Internal-only</Button><Button variant="ghost" onClick={() => setPaymentOpen(false)}>Close</Button></div></div></div>}</section>;
 }
