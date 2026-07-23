@@ -4,12 +4,12 @@ import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Download, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatCurrency } from "@/lib/currency";
 
 type Option = { id: string; name: string }; type Row = Record<string, unknown>;
 type Dashboard = { summary: Row; sales_by_day: Row[]; payment_methods: Row[]; products: Row[]; categories: Row[]; employees: Row[]; tables: Row[]; orders: Row[]; operations: Row };
 type Props = { data: Dashboard | null; error?: string; canOperational: boolean; canFinancial: boolean; filters: Record<string, string>; staff: Option[]; methods: Option[]; categories: Option[] };
-const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
-const n = (v: unknown) => money.format(Number(v || 0));
+const n = (v: unknown) => formatCurrency(Number(v || 0));
 const date = (v: unknown) => v ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(String(v))) : "—";
 const time = (v: unknown) => v ? new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(String(v))) : "Open";
 const text = (v: unknown) => String(v ?? "").toLowerCase();
