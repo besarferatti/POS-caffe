@@ -9,7 +9,7 @@ export default async function OrdersPage() {
   const [{ data: floorLayout, error: floorLayoutError }, { data: categories, error: categoriesError }, { data: products, error: productsError }, { data: openOrders, error: openOrdersError }, { data: reservations }] = await Promise.all([
     supabase.from("floor_layouts").select("layout").eq("id", 1).maybeSingle(),
     supabase.from("categories").select("id, name").eq("active", true).order("sort_order"),
-    supabase.from("products").select("id, category_id, name, price").eq("active", true).order("sort_order"),
+    supabase.from("products").select("id, category_id, name, price, tax_rate").eq("active", true).order("sort_order"),
     supabase.from("orders").select("id, table_id, status, subtotal").in("status", ["open", "sent", "partially_paid", "internal_only"]),
     supabase.from("table_reservations").select("table_object_id").is("released_at", null)
   ]);
