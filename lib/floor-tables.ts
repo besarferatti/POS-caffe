@@ -1,15 +1,21 @@
 export type TableStatus = "available" | "occupied" | "reserved";
 
 export type FloorTable = {
+  /** The immutable UUID assigned to the table object by the floor editor. */
   id: string;
   name: string;
   status: TableStatus;
+  x: number | undefined;
+  y: number | undefined;
+  width: number | undefined;
+  height: number | undefined;
+  rotation: number | undefined;
 };
 
 type JsonRecord = Record<string, unknown>;
 
-const TABLE_SHAPES = new Set(["round", "square", "rectangle", "rectangular"]);
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** These are the exact object types written by the floor editor for tables. */
+const TABLE_OBJECT_TYPES = new Set(["square-table", "round-table", "rectangle-table"]);
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,35 +30,22 @@ function labelValue(value: unknown) {
   return stringValue(value);
 }
 
-function tableId(object: JsonRecord) {
-  const id = stringValue(object.uuid) ?? stringValue(object.id) ?? stringValue(object.objectId);
-  return id && UUID_PATTERN.test(id) ? id : undefined;
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/**
- * Floor plans are saved as a canvas JSON document.  The editor has used both
- * `type: "table"` plus a shape and shape-specific type values over time, so
- * recognize the persisted table variants without changing the stored layout.
- */
 function isTableObject(object: JsonRecord) {
-  const type = [object.type, object.objectType, object.kind, object.tableType, object.tableShape]
-    .map(stringValue)
-    .filter((value): value is string => Boolean(value))
-    .join(" ")
-    .toLowerCase();
-  const shape = stringValue(object.shape)?.toLowerCase();
-  const hasTableLabel = [object.name, object.tableName, object.tableNumber, object.label].some(labelValue);
-
-  return type.includes("table")
-    || (shape !== undefined && (TABLE_SHAPES.has(shape) || shape.includes("table")) && hasTableLabel);
+  const type = stringValue(object.type)?.toLowerCase();
+  return type !== undefined && TABLE_OBJECT_TYPES.has(type);
 }
 
-function labelForTable(object: JsonRecord, index: number) {
-  return labelValue(object.name)
+function labelForTable(object: JsonRecord) {
+  return labelValue(object.label)
+    ?? labelValue(object.name)
+    ?? labelValue(object.number)
     ?? labelValue(object.tableName)
     ?? labelValue(object.tableNumber)
-    ?? labelValue(object.label)
-    ?? `Table ${index + 1}`;
+    ?? "Unnamed table";
 }
 
 function statusForTable(object: JsonRecord): TableStatus {
@@ -60,26 +53,30 @@ function statusForTable(object: JsonRecord): TableStatus {
   return status === "reserved" || status === "occupied" ? status : "available";
 }
 
-/** Extract table canvas objects while retaining their editor-generated UUID. */
+/**
+ * Extract table objects from the floor editor's persisted canvas document.
+ * Only `layout.objects` is the editor object collection: inspecting nested
+ * values can accidentally treat metadata or non-table decorations as tables.
+ */
 export function tablesFromFloorLayout(layout: unknown): FloorTable[] {
-  const tables: FloorTable[] = [];
-  const seenIds = new Set<string>();
+  if (!isRecord(layout) || !Array.isArray(layout.objects)) return [];
 
-  function visit(value: unknown) {
-    if (Array.isArray(value)) {
-      value.forEach(visit);
-      return;
-    }
-    if (!isRecord(value)) return;
+  return layout.objects.flatMap((value) => {
+    if (!isRecord(value) || !isTableObject(value)) return [];
 
-    const id = tableId(value);
-    if (id && isTableObject(value) && !seenIds.has(id)) {
-      seenIds.add(id);
-      tables.push({ id, name: labelForTable(value, tables.length), status: statusForTable(value) });
-    }
-    Object.values(value).forEach(visit);
-  }
+    // Do not fall back to derived IDs: orders are keyed to this editor UUID.
+    const id = stringValue(value.id);
+    if (!id) return [];
 
-  visit(layout);
-  return tables;
+    return [{
+      id,
+      name: labelForTable(value),
+      status: statusForTable(value),
+      x: numberValue(value.x),
+      y: numberValue(value.y),
+      width: numberValue(value.width),
+      height: numberValue(value.height),
+      rotation: numberValue(value.rotation),
+    }];
+  });
 }
