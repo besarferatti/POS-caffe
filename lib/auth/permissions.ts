@@ -1,12 +1,13 @@
 export const roles = ["admin", "manager", "worker"] as const;
 export type Role = (typeof roles)[number];
 
-export const permissions = ["staff:read", "staff:manage", "settings:manage", "pos:use"] as const;
+// Keep this list aligned with the permissions seeded by the database migrations.
+export const permissions = ["staff:read", "staff:manage", "settings:manage", "pos:use", "products:manage"] as const;
 export type Permission = (typeof permissions)[number];
 
 const rolePermissions: Record<Role, readonly Permission[]> = {
   admin: permissions,
-  manager: ["staff:read", "pos:use"],
+  manager: ["staff:read", "pos:use", "products:manage"],
   worker: ["pos:use"]
 };
 
