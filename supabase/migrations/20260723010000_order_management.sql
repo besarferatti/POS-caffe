@@ -117,3 +117,12 @@ create policy "staff use orders" on public.orders for all to authenticated using
 create policy "staff use order items" on public.order_items for all to authenticated using (true) with check (true);
 
 grant execute on function public.open_order_for_table(uuid) to authenticated;
+
+-- The editor stores the full canvas document here.  Existing installations may already have this table.
+create table if not exists public.floor_layouts (
+  id integer primary key default 1 check (id = 1),
+  layout jsonb not null default '{"objects": []}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+alter table public.floor_layouts enable row level security;
+create policy "staff use floor layouts" on public.floor_layouts for all to authenticated using (true) with check (true);
