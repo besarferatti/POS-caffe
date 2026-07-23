@@ -1,60 +1,40 @@
-# POS Caffè — Phase 1
+# POS Caffè
 
-The Phase 1 foundation is a single **Next.js App Router** application backed by Supabase. It establishes strict TypeScript, Tailwind CSS, shadcn/ui configuration, Supabase SSR authentication, roles, permissions, protected routes, and database migrations. It deliberately does **not** implement POS ordering, floor plans, inventory, reports, printers, or the other deferred product features.
-
-## Prerequisites
-
-- Node.js 20.9 or later
-- npm 10 or later
-- A Supabase project and (optional, for local database work) the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)
+A single-client, Supabase-backed restaurant POS. The floor editor remains the source of layout geometry; each saved table object's immutable UUID is the order key. Visible labels are presentation only.
 
 ## Setup
 
-1. Install dependencies:
-
-   ```bash
-   npm install
-   ```
-
-2. Create your local environment file and enter the project URL and publishable/anon key from Supabase Dashboard → Project Settings → API:
-
-   ```bash
-   cp .env.example .env.local
-   ```
-
-3. Apply the migration and seed data. For a linked remote project:
+1. Create `.env.local` from `.env.example` and supply `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+2. Apply the ordered migrations, then optionally seed a new development database:
 
    ```bash
    npx supabase db push
    npx supabase db execute --file supabase/seed.sql
    ```
 
-   For local development, run `npx supabase start`, then `npx supabase db reset`. The reset process applies `supabase/migrations` and `supabase/seed.sql`.
+   `database-setup.sql` is a convenience concatenation of the same migrations for a fresh Supabase SQL-editor installation. Do **not** run it against a database that already has migration history; use `supabase db push` instead.
+3. Create the first account with Supabase Auth and promote it to admin:
 
-4. Start the app:
-
-   ```bash
-   npm run dev
+   ```sql
+   update public.profiles set role = 'admin' where id = '<auth-user-uuid>';
    ```
 
-## Authentication and authorization
+## Database delivery
 
-- `/login` signs users in with Supabase email/password authentication.
-- `/app` and its descendants are protected by middleware and a server-side profile check.
-- An `auth.users` trigger creates a matching `public.profiles` row with the `worker` role for each new account.
-- Roles are `admin`, `manager`, and `worker`. The seeded permission matrix is the source of record in the database; the TypeScript permission helper mirrors it for server-rendered navigation and route guards.
-- Promote the first account to administrator in the Supabase SQL editor after it signs in:
+The current migration set includes authentication and roles, core catalog and orders, migration of orders to floor-object UUIDs, then `20260723030000_add_order_status_values.sql` **by itself**, followed by `20260723031000_pos_operational_hardening.sql` for catalog metadata, active-order concurrency, reservations, payment records, printer queue/attempt history, audit data, and permission-based RLS. Existing databases must be upgraded only through these chronological migration files; never use `database-setup.sql` there.
 
-  ```sql
-  update public.profiles set role = 'admin' where id = '<auth-user-uuid>';
-  ```
+The print queue intentionally has no browser-side hardware provider. A local authenticated print agent must claim `pending` jobs, submit the job's `idempotency_key` to the configured internal or fiscal adapter, and write a `print_attempt` plus either `printed` (with the real device response) or `failed` (with the failure reason). An agent retry must reuse the idempotency key; it must not infer success when the device is unreachable.
 
-Row-level security permits each user to read their own profile, allows managers and administrators to read staff profiles, and only allows administrators to change profiles. Direct table writes are therefore not a substitute for a future admin-user provisioning flow.
+## Current operational scope and limitations
+
+- The Orders screen renders all saved floor objects read-only, preserves geometry and stacking, uses immutable table UUIDs, and derives occupied/reserved state from active orders and reservations.
+- The floor editor remains unchanged in interaction model, now retains stacking metadata and supports dividers. A legacy round table without a label is given an editable display label without changing its UUID.
+- The schema exposes payment, print, reservation, and audit primitives with RLS. Full product administration, payment/split/refund UI, inventory, shifts, reports, settings, localized UI, and a deployable local print-agent service still require implementation; no hardware success is simulated.
 
 ## Checks
 
 ```bash
-npm run lint
 npm run typecheck
+npm run lint
 npm run build
 ```

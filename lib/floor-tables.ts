@@ -10,6 +10,7 @@ export type FloorTable = {
   width: number | undefined;
   height: number | undefined;
   rotation: number | undefined;
+  zIndex: number;
   shape: "round" | "square" | "rectangle";
 };
 
@@ -22,6 +23,7 @@ export type FloorObject = {
   width: number;
   height: number;
   rotation: number;
+  zIndex: number;
   shape: "round" | "square" | "rectangle" | undefined;
   status: TableStatus;
   isTable: boolean;
@@ -61,14 +63,14 @@ function shapeForObject(object: JsonRecord) {
   return shape.includes("rectangle") || shape.includes("rectangular") ? "rectangle" as const : undefined;
 }
 
-function labelForTable(object: JsonRecord) {
+function labelForTable(object: JsonRecord, fallbackNumber?: number) {
   return labelValue(object.label)
     ?? labelValue(object.name)
     ?? labelValue(object.number)
     ?? labelValue(object.tableName)
     ?? labelValue(object.tableNumber)
     ?? labelValue(object.text)
-    ?? "Unnamed table";
+    ?? (fallbackNumber ? `Table ${fallbackNumber}` : "");
 }
 
 function statusForTable(object: JsonRecord): TableStatus {
@@ -84,6 +86,7 @@ function statusForTable(object: JsonRecord): TableStatus {
 export function tablesFromFloorLayout(layout: unknown): FloorTable[] {
   if (!isRecord(layout) || !Array.isArray(layout.objects)) return [];
 
+  let tableNumber = 0;
   return layout.objects.flatMap((value) => {
     if (!isRecord(value) || !isTableObject(value)) return [];
 
@@ -91,15 +94,17 @@ export function tablesFromFloorLayout(layout: unknown): FloorTable[] {
     const id = stringValue(value.id);
     if (!id) return [];
 
+    tableNumber += 1;
     return [{
       id,
-      name: labelForTable(value),
+      name: labelForTable(value, tableNumber),
       status: statusForTable(value),
       x: numberValue(value.x),
       y: numberValue(value.y),
       width: numberValue(value.width),
       height: numberValue(value.height),
       rotation: numberValue(value.rotation),
+      zIndex: numberValue(value.zIndex) ?? numberValue(value.z_index) ?? 0,
       shape: shapeForObject(value) ?? "rectangle",
     }];
   });
@@ -116,12 +121,13 @@ export function objectsFromFloorLayout(layout: unknown): FloorObject[] {
     return [{
       id: stringValue(value.id) ?? `decoration-${index}`,
       type,
-      label: labelForTable(value),
+      label: isTable ? labelForTable(value) : (labelForTable(value) || type),
       x: numberValue(value.x) ?? 0,
       y: numberValue(value.y) ?? 0,
       width: numberValue(value.width) ?? (type === "wall" || type === "divider" ? 180 : 120),
       height: numberValue(value.height) ?? (type === "wall" || type === "divider" ? 10 : 80),
       rotation: numberValue(value.rotation) ?? 0,
+      zIndex: numberValue(value.zIndex) ?? numberValue(value.z_index) ?? 0,
       shape: shapeForObject(value),
       status: statusForTable(value),
       isTable,
