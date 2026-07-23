@@ -14,5 +14,7 @@ export async function signIn(formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) redirect("/login?error=Unable+to+sign+in");
+  const { data: profile } = await supabase.from("profiles").select("active").eq("id", (await supabase.auth.getUser()).data.user?.id ?? "").maybeSingle();
+  if (!profile?.active) { await supabase.auth.signOut(); redirect("/login?error=This+staff+account+is+inactive"); }
   redirect("/app");
 }

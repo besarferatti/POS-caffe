@@ -10,11 +10,11 @@ export async function getCurrentProfile() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, display_name, role")
+    .select("id, display_name, role, active")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !roles.includes(profile.role as Role)) return null;
+  if (!profile || !profile.active || !roles.includes(profile.role as Role)) return null;
   return { ...profile, role: profile.role as Role, email: user.email ?? "" };
 }
 
