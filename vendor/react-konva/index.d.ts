@@ -1,0 +1,2 @@
+import * as React from 'react';
+export const Stage: React.ForwardRefExoticComponent<any>; export const Layer: React.ForwardRefExoticComponent<any>; export const Group: React.ForwardRefExoticComponent<any>; export const Rect: React.ForwardRefExoticComponent<any>; export const Circle: React.ForwardRefExoticComponent<any>; export const Line: React.ForwardRefExoticComponent<any>; export const Text: React.ForwardRefExoticComponent<any>; export const Transformer: React.ForwardRefExoticComponent<any>;
