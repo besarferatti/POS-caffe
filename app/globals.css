@@ -11,4 +11,17 @@
   }
   * { @apply border-border; }
   body { @apply min-h-screen bg-background text-foreground antialiased; }
+  .floor-canvas { position: relative; min-height: 620px; min-width: 720px; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background-color: hsl(var(--background)); background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px); background-size: 20px 20px; }
+  .floor-object { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; transform-origin: center; }
+  .floor-table { flex-direction: column; border: 2px solid hsl(var(--primary)); background: hsl(var(--accent)); color: hsl(var(--foreground)); font-size: .8rem; font-weight: 700; box-shadow: 0 1px 2px rgb(0 0 0 / .12); cursor: pointer; }
+  .floor-table small { font-size: .65rem; font-weight: 500; text-transform: capitalize; }
+  .floor-table:hover, .floor-selected { outline: 3px solid hsl(var(--ring) / .4); z-index: 2; }
+  .floor-occupied { border-color: #d97706; background: #fef3c7; }
+  .floor-reserved { border-color: #2563eb; background: #dbeafe; }
+  .floor-decoration { color: hsl(var(--muted-foreground)); font-size: .75rem; font-weight: 600; pointer-events: none; }
+  .floor-wall, .floor-divider { background: hsl(var(--foreground) / .65); color: transparent; }
+  .floor-door { border: 2px dashed hsl(var(--muted-foreground)); border-radius: 999px; }
+  .floor-bar, .floor-kitchen { border: 2px solid hsl(var(--muted-foreground)); background: hsl(var(--muted)); border-radius: .25rem; }
+  .editor-object { cursor: move; }
+  .editor-object:focus { outline: 3px solid hsl(var(--ring) / .5); z-index: 3; }
 }
